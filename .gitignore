@@ -1,0 +1,4 @@
+bin
+data
+compile_flags.txt
+.env
