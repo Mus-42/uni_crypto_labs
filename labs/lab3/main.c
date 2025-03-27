@@ -49,7 +49,7 @@ typedef struct {
 
 void sha256_display_hash(const Sha256Hash* h) {
     for (size_t i = 0; i < 8; i++) {
-        printf("%08X", h->h[i]);
+        printf("%08x", h->h[i]);
     }
     putchar('\n');
 }
@@ -231,7 +231,7 @@ void task2() {
 
 #define K_MIN 5
 #define K_MAX 32
-#define K_TARGET 40
+#define K_TARGET 32
 #define K_TESTS 100
 
 uint64_t collisions_bitset[(((size_t)1<<K_MAX)+63)>>6];
@@ -244,11 +244,15 @@ typedef struct {
 #define SEED_TABLE_SIZE (1<<20)
 SeedTableEntry collision_seeds[SEED_TABLE_SIZE];
 
-double time_now() {
+static double time_now() {
     struct timespec t = {0};
     int ret = clock_gettime(CLOCK_MONOTONIC, &t);
     assert(ret == 0);
     return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
+}
+
+static uint32_t u32_swap_bytes(uint32_t w) {
+    return w >> 24 | (w >> 8 & 0xFF00) | (w << 8 & 0xFF0000) | (w << 24 & 0xFF000000);
 }
 
 void task3_1() {
@@ -322,21 +326,25 @@ void task3_2() {
     double end = time_now();
     printf("first %d bit collision found in %lfs (%zu iterations)\nseed_a = %u, seed_b = %u\n", K_TARGET, (end - start), total_iterations, seed_a, seed_b);
 
+    printf("input a (hex):\n");
     for (size_t j = 0; j < 16; j++) {
         buf[j] = xorshift_next(&seed_a);
+        printf("%08x", u32_swap_bytes(buf[j]));
     }
     sha256_init(&state);
     sha256_accumulate_hash(&state, sizeof(buf), (const char*)buf);
     Sha256Hash hash_a = sha256_finish(&state);
+    printf("\nhash_a:\n");
+    sha256_display_hash(&hash_a);
+    printf("input b (hex):\n");
     for (size_t j = 0; j < 16; j++) {
         buf[j] = xorshift_next(&seed_b);
+        printf("%08x", u32_swap_bytes(buf[j]));
     }
-    printf("hash_a:\n");
-    sha256_display_hash(&hash_a);
     sha256_init(&state);
     sha256_accumulate_hash(&state, sizeof(buf), (const char*)buf);
     Sha256Hash hash_b = sha256_finish(&state);
-    printf("hash_b:\n");
+    printf("\nhash_b:\n");
     sha256_display_hash(&hash_b);
 }
 
