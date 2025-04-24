@@ -5,18 +5,13 @@
 #include <labs_random.h>
 #include <tommath.h>
 
-
-
 #define MP_DIGITS_ROUND_UP(BITS) (BITS + MP_DIGIT_BIT - 1) / MP_DIGIT_BIT
 #define PRIME_BITS 512
-#define PRIME_MP_DIGITS MP_DIGITS_ROUND_UP(PRIME_BITS)
 #define MILLER_RABIN_BASE_BITS 512
-#define MILLER_RABIN_BASE_MP_DIGITS MP_DIGITS_ROUND_UP(MILLER_RABIN_BASE_BITS)
 #define MILLER_RABIN_ROUNDS 100
 #define MODULUS_BITS 1024
 
-#define PRIMALITY_TEST_PRINT_INFO true
-
+#define PRIMALITY_TEST_PRINT_INFO false 
 
 // a - number
 // b - base
@@ -86,11 +81,18 @@ LBL_ERR1:
 }
 
 
-// TODO
-// mp_err mp_mask_n_bits(const mp_int* a, int n) {
-//     if (a->used < MP_DIGITS_ROUND_UP) 
-//     return MP_OKAY;
-// }
+mp_err mp_rand_int_bits(mp_int* a, int bits) {
+    mp_err err;
+    if ((err = mp_rand(a, MP_DIGITS_ROUND_UP(bits))) != MP_OKAY)
+        return err;
+    if (MP_DIGITS_ROUND_UP(bits) != a->used || a->used < 0)
+        return MP_ERR;
+    // set all above high bit to 0
+    a->dp[MP_DIGITS_ROUND_UP(bits) - 1] &= (1ull << ((bits - 1) % MP_DIGIT_BIT)) - 1;
+    // set high bit to 1
+    a->dp[MP_DIGITS_ROUND_UP(bits) - 1] |= 1ull << ((bits - 1) % MP_DIGIT_BIT);
+    return err;
+}
 
 mp_err miller_rabin_test_rounds(const mp_int *a, int rounds, bool *result) {
     mp_int base, a2;
@@ -116,7 +118,7 @@ mp_err miller_rabin_test_rounds(const mp_int *a, int rounds, bool *result) {
     for (int i = 0; i < rounds; i++) {
         bool test_result;
         // base = (rand()) % (a - 2) + 2
-        if ((err = mp_rand(&base, MILLER_RABIN_BASE_MP_DIGITS)) != MP_OKAY)
+        if ((err = mp_rand_int_bits(&base, MILLER_RABIN_BASE_BITS)) != MP_OKAY)
             goto CLEANUP;
         if ((err = mp_mod(&base, &a2, &base)) != MP_OKAY)
             goto CLEANUP;
@@ -149,10 +151,10 @@ LBL_ERR1:
     return err;
 }
 
-mp_err pick_large_prime(int digits, int test_rounds, mp_int* prime) {
+mp_err pick_large_prime(int bits, int test_rounds, mp_int* prime) {
     mp_err err;
     while (true) {
-        if ((err = mp_rand(prime, digits)) != MP_OKAY)
+        if ((err = mp_rand_int_bits(prime, bits)) != MP_OKAY)
             return err;
 
         bool is_prime;
@@ -188,14 +190,20 @@ typedef struct {
     mp_int d;
     // modulus
     mp_int n;
+    // d mod p-1
+    mp_int d_p;
+    // d mod q-1
+    mp_int d_q;
+    // q^-1 mod p
+    mp_int q_inv;
 } RSAState;
 
 mp_err rsa_init(RSAState* s) {
-    return mp_init_multi(&s->p, &s->q, &s->e, &s->d, &s->n, NULL);
+    return mp_init_multi(&s->p, &s->q, &s->e, &s->d, &s->n, &s->d_p, &s->d_q, &s->q_inv, NULL);
 }
 
 void rsa_clear(RSAState* s) {
-    mp_clear_multi(&s->p, &s->q, &s->e, &s->d, &s->n, NULL);
+    mp_clear_multi(&s->p, &s->q, &s->e, &s->d, &s->n, &s->d_p, &s->d_q, &s->q_inv, NULL);
 }
 
 mp_err rsa_pick_key(RSAState* s) {
@@ -203,11 +211,10 @@ mp_err rsa_pick_key(RSAState* s) {
     mp_int phi, t;
     
     // pick p and q
-    if ((err = pick_large_prime(PRIME_MP_DIGITS, MILLER_RABIN_ROUNDS, &s->p)) != MP_OKAY)
+    if ((err = pick_large_prime(PRIME_BITS, MILLER_RABIN_ROUNDS, &s->p)) != MP_OKAY)
         return err; 
-    if ((err = pick_large_prime(PRIME_MP_DIGITS, MILLER_RABIN_ROUNDS, &s->q)) != MP_OKAY)
+    if ((err = pick_large_prime(PRIME_BITS, MILLER_RABIN_ROUNDS, &s->q)) != MP_OKAY)
         return err;
-
 
     // n = p * q
     if ((err = mp_mul(&s->p, &s->q, &s->n)) != MP_OKAY)
@@ -233,6 +240,26 @@ mp_err rsa_pick_key(RSAState* s) {
     if ((err = mp_invmod(&s->e, &phi, &s->d)) != MP_OKAY)
         goto CLEANUP;
 
+    // d_p = d mod p - 1
+    if ((err = mp_copy(&s->p, &t)) != MP_OKAY)
+        goto CLEANUP;
+    if ((err = mp_sub_d(&t, 1, &t)) != MP_OKAY)
+        goto CLEANUP;
+    if ((err = mp_mod(&s->d, &t, &s->d_p)) != MP_OKAY)
+        goto CLEANUP;
+
+    // d_q = d mod q - 1
+    if ((err = mp_copy(&s->q, &t)) != MP_OKAY)
+        goto CLEANUP;
+    if ((err = mp_sub_d(&t, 1, &t)) != MP_OKAY)
+        goto CLEANUP;
+    if ((err = mp_mod(&s->d, &t, &s->d_q)) != MP_OKAY)
+        goto CLEANUP;
+
+    // q_inv = q^-1 mod p
+    if ((err = mp_invmod(&s->q, &s->p, &s->q_inv)) != MP_OKAY)
+        goto CLEANUP;
+
 CLEANUP:
     mp_clear(&t);
 LBL_ERR1:
@@ -251,8 +278,35 @@ mp_err rsa_decrypt_dumm(const RSAState* s, const mp_int* c, mp_int* m) {
 }
 
 mp_err rsa_decrypt(const RSAState* s, const mp_int* c, mp_int* m) {
-    // m = (c)^d mod n
-    return mp_exptmod(c, &s->d, &s->n, m);
+    mp_err err;
+    mp_int m1, m2, h;
+
+    if ((err = mp_init_multi(&m1, &m2, &h, NULL)) != MP_OKAY)
+        return err;
+    
+    // m1 = c^d_p mod p
+    if ((err = mp_exptmod(c, &s->d_p, &s->p, &m1)) != MP_OKAY)
+        goto CLEANUP;
+    
+    // m2 = c^d_q mod q
+    if ((err = mp_exptmod(c, &s->d_q, &s->q, &m2)) != MP_OKAY)
+        goto CLEANUP;
+    
+    // h = q_inv (m1 - m2) mod p
+    if ((err = mp_submod(&m1, &m2, &s->p, &h)) != MP_OKAY)
+        goto CLEANUP;
+    if ((err = mp_mulmod(&h, &s->q_inv, &s->p, &h)) != MP_OKAY)
+        goto CLEANUP;
+    
+    // m = m2 + h q
+    if ((err = mp_mulmod(&h, &s->q, &s->n, m)) != MP_OKAY)
+        goto CLEANUP;
+    if ((err = mp_addmod(m, &m2, &s->n, m)) != MP_OKAY)
+        goto CLEANUP;
+    
+CLEANUP:
+    mp_clear_multi(&m1, &m2, &h, NULL);
+    return err;
 }
 
 mp_err show_primes_up_to_1000() {
@@ -269,20 +323,6 @@ mp_err show_primes_up_to_1000() {
             goto CLEANUP;
         if ((err = miller_rabin_test_rounds(&a, MILLER_RABIN_ROUNDS, &is_prime)) != MP_OKAY)
             goto CLEANUP;
-        // if ((err = mp_init_u64(&a, i)) != MP_OKAY) {
-        //     goto CLEANUP;
-        // }
-        // for (uint64_t j = 2; j < i; j++) {
-        //     if ((err = mp_init_u64(&b, j)) != MP_OKAY) {
-        //         goto CLEANUP;
-        //     }
-        //     bool result;
-        //     miller_rabin_test(&a, &b, &result);
-        //     if (!result) {
-        //         is_prime = false;
-        //         break;
-        //     }
-        // }
         if (is_prime) {
             count += 1;
             printf("%zu\n", i);
@@ -299,7 +339,7 @@ mp_err show_pick_large_prime() {
     mp_int prime;
 
     if (mp_init(&prime) != MP_OKAY) return EXIT_FAILURE;
-    if ((err = pick_large_prime(PRIME_MP_DIGITS, MILLER_RABIN_ROUNDS, &prime)) != MP_OKAY)
+    if ((err = pick_large_prime(PRIME_BITS, MILLER_RABIN_ROUNDS, &prime)) != MP_OKAY)
         goto CLEANUP;
     if ((err = mp_fwrite(&prime, 10, stdout)) != MP_OKAY)
         goto CLEANUP;
@@ -316,12 +356,12 @@ mp_err show_rsa_demo() {
     if ((err = rsa_init(&state)) != MP_OKAY) 
         return err; 
     if ((err = rsa_pick_key(&state)) != MP_OKAY) 
-        goto CLEANUP;
+        goto LBL_ERR1;
     
     mp_int m, c;
     
     if ((err = mp_init_multi(&m, &c, NULL)) != MP_OKAY) 
-        goto CLEANUP;
+        goto LBL_ERR1;
 
     if ((err = mp_init_u32(&m, 4242004242)) != MP_OKAY) 
         goto CLEANUP;
@@ -355,8 +395,9 @@ mp_err show_rsa_demo() {
         goto CLEANUP;
     putchar('\n');
 
-    mp_clear_multi(&m, &c, NULL);
 CLEANUP:
+    mp_clear_multi(&m, &c, NULL);
+LBL_ERR1:
     rsa_clear(&state);
     return err;
 }

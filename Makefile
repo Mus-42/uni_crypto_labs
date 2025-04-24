@@ -1,5 +1,6 @@
 CC:=gcc
-CC_FLAGS:=-O2 -march=native -std=gnu11 -I labs/common/include 
+CC_FLAGS:=-g -march=native -std=gnu11 -I labs/common/include 
+# CC_FLAGS:=-O2 -march=native -std=gnu11 -I labs/common/include 
 
 .PHONY: lab1
 lab1: bin/lab1
