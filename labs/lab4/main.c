@@ -20,6 +20,8 @@
 
 #define PRIMALITY_TEST_PRINT_INFO false 
 
+#define OAEP_LABEL "Cool label"
+
 // MILLER RABIN
 
 // a - number
@@ -160,56 +162,6 @@ LBL_ERR1:
     return err;
 }
 
-// message 
-
-#define MSG_BUF_BYTES (MODULUS_BITS / 8)
-// MSG & OEAP parts
-#define MSG_BUF_OAEP_BYTES 16
-#define MSG_BUF_MSG_BYTES (MSG_BUF_BYTES - MSG_BUF_OAEP_BYTES)
-
-typedef struct {
-    char buf[MSG_BUF_BYTES];
-} MsgBuf;
-
-
-// OAEP
-// (RFC 8017)
-
-mp_err msg_init(MsgBuf* msg_buf, const char* msg) {
-    size_t len = strlen(msg);
-    if (len > MSG_BUF_MSG_BYTES)
-        return MP_VAL;
-
-    memset(&msg_buf->buf[len], 0, MSG_BUF_BYTES-len);
-    memcpy(&msg_buf->buf[0], msg, len);
-
-    return MP_OKAY;
-}
-
-#define SPLIT_N (MSG_BUF_BYTES / 2)
-
-void msg_print_buf(const MsgBuf* msg_buf) {
-    for (size_t i = 0; i < MSG_BUF_BYTES; i++) {
-        printf("%02x", (unsigned char)msg_buf->buf[i]);
-
-        if (i % SPLIT_N == SPLIT_N - 1) {
-            putchar('\n');
-        }
-    }
-    for (size_t i = 0; i < MSG_BUF_BYTES; i++) {
-        if (isprint(msg_buf->buf[i])) {
-            printf(" %c", msg_buf->buf[i]);
-        } else {
-            printf(" .");
-        }
-
-        if (i % SPLIT_N == SPLIT_N - 1) {
-            putchar('\n');
-        }
-    }
-    putchar('\n');
-}
-
 uint32_t get_rng_seed() {
     struct timespec t = {0};
     int ret = clock_gettime(CLOCK_MONOTONIC, &t);
@@ -217,19 +169,23 @@ uint32_t get_rng_seed() {
     return (uint32_t)t.tv_nsec;
 }
 
-// #define OAEP_HASH_LEN (16 * 4) // in bytes
-#define OAEP_HASH_LEN 16  // in bytes
+// NOTE: for now works only for OAEP_HASH_LEN == OAEP_SEED_LEN 
+// AND 1 <= OAEP_SEED_LEN <= 4
+#define OAEP_HASH_LEN 4 // in bytes
+#define OAEP_SEED_LEN 4
 
 // https://www.rfc-editor.org/rfc/rfc8017#appendix-B.2.1
 // mgf1
-void oaep_mgf(uint32_t seed, char* buf, size_t len) {
-    char seed_buf[8];
-    memcpy(&seed_buf[0], &seed, 4);
+void oaep_mgf(const char* seed, size_t seed_len, char* buf, size_t len) {
+    static char seed_buf[256];
+    assert(seed_len + 4 < 256);
+
+    memcpy(&seed_buf[0], seed, seed_len);
     Sha256State sha256;
     for (uint32_t i = 0; i < len; i += OAEP_HASH_LEN) {
-        memcpy(&seed_buf[4], &i, 4);
+        memcpy(&seed_buf[seed_len], &i, 4);
         sha256_init(&sha256);
-        sha256_accumulate_hash(&sha256, sizeof(seed_buf), seed_buf);
+        sha256_accumulate_hash(&sha256, seed_len + 4, seed_buf);
         Sha256Hash hash = sha256_finish(&sha256);
         size_t n = len - i;
         if (n > OAEP_HASH_LEN) 
@@ -355,6 +311,33 @@ LBL_ERR1:
     return err;
 }
 
+mp_err rsa_print_keys(const RSAState* s) {
+    mp_err err;
+    printf("RSA State:\n");
+    printf("p = ");
+    if ((err = mp_fwrite(&s->p, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+    printf("q = ");
+    if ((err = mp_fwrite(&s->q, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+    printf("e = ");
+    if ((err = mp_fwrite(&s->e, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+    printf("d = ");
+    if ((err = mp_fwrite(&s->d, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+    printf("n = ");
+    if ((err = mp_fwrite(&s->n, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+CLEANUP:
+    return err;
+}
+
 mp_err rsa_encrypt(const RSAState* s, const mp_int* m, mp_int* c) {
     // c = (m)^e mod n 
     return mp_exptmod(m, &s->e, &s->n, c);
@@ -399,23 +382,52 @@ CLEANUP:
 
 // OAEP
 
-mp_err bignum_to_msg(MsgBuf* msg_buf, mp_int num) {
-    mp_err err;
-
-    return err;
-}
-
+#define MSG_BUF_BYTES (MODULUS_BITS / 8)
+// MSG & OEAP parts
 #define DB_LEN (MSG_BUF_BYTES - OAEP_HASH_LEN - 1)
 
-mp_err msg_oaep_encrypt(const char* msg) {
+typedef struct {
+    char buf[MSG_BUF_BYTES];
+} PaddedMessage;
+
+typedef struct {
+    size_t msg_len;
+    char buf[DB_LEN];
+} UnPaddedMessage;
+
+void buf_display_print(const char* buf, size_t len) {
+    // TODO pick something smarter here (works for now as is but..)
+    const size_t split_n = len / 2; 
+    for (size_t i = 0; i < len; i++) {
+        printf("%02x", (unsigned char)buf[i]);
+
+        if (i % split_n == split_n - 1) {
+            putchar('\n');
+        }
+    }
+    for (size_t i = 0; i < len; i++) {
+        if (isprint(buf[i])) {
+            printf(" %c", buf[i]);
+        } else {
+            printf(" .");
+        }
+
+        if (i % split_n == split_n - 1) {
+            putchar('\n');
+        }
+    }
+    putchar('\n');
+}
+
+// apply padding
+void msg_oaep_encrypt(PaddedMessage* msg_buf, const char* msg) {
     size_t msg_len = strlen(msg);
-    // too long
-    if (msg_len + 2 * OAEP_HASH_LEN + 2 > MSG_BUF_BYTES)
-        return MP_VAL;
+    assert(msg_len + 2 * OAEP_HASH_LEN + 2 <= MSG_BUF_BYTES);
 
     Sha256State sha256;
     sha256_init(&sha256);
-    // hash of empty label
+    sha256_accumulate_hash(&sha256, sizeof(OAEP_LABEL), OAEP_LABEL);
+    // label hash 
     Sha256Hash l_hash = sha256_finish(&sha256);
 
     uint32_t seed = get_rng_seed();
@@ -427,11 +439,89 @@ mp_err msg_oaep_encrypt(const char* msg) {
     db[DB_LEN-msg_len-1] = 1;
     memcpy(&db[DB_LEN-msg_len], msg, msg_len);
 
-    for (size_t i = 0; i < 0; i++) {
-        
+    char db_mask[DB_LEN] = {0};
+    oaep_mgf((const char*)&seed, OAEP_SEED_LEN, &db_mask[0], DB_LEN);
+
+    char masked_db[DB_LEN] = {0};
+    for (size_t i = 0; i < DB_LEN; i++) {
+        masked_db[i] = db[i] ^ db_mask[i];
     }
 
+    uint32_t seed_mask;
+    oaep_mgf(&masked_db[0], DB_LEN, (char*)&seed_mask, OAEP_SEED_LEN);
+    
+    uint32_t masked_seed = seed_mask ^ seed;
+
+    // em = 0 || masked_seed || masked_db
+
+    assert(1 + OAEP_SEED_LEN + DB_LEN == MSG_BUF_BYTES);
+
+    msg_buf->buf[0] = 0;
+    memcpy(&msg_buf->buf[1], &masked_seed, OAEP_SEED_LEN);
+    memcpy(&msg_buf->buf[1 + OAEP_SEED_LEN], &masked_db[0], DB_LEN);
+}
+
+// retirve message 
+mp_err msg_oaep_decrypt(const PaddedMessage* msg_buf, UnPaddedMessage* msg) {
+    if (msg_buf->buf[0] != 0)
+        return MP_VAL;
+
+    Sha256State sha256;
+    sha256_init(&sha256);
+    sha256_accumulate_hash(&sha256, sizeof(OAEP_LABEL), OAEP_LABEL);
+    // label hash 
+    Sha256Hash l_hash = sha256_finish(&sha256);
+
+    uint32_t masked_seed;
+    char masked_db[DB_LEN] = {0};
+
+    memcpy(&masked_seed, &msg_buf->buf[1], OAEP_SEED_LEN);
+    memcpy(&masked_db[0], &msg_buf->buf[1 + OAEP_SEED_LEN], DB_LEN);
+
+    uint32_t seed_mask;
+    oaep_mgf(&masked_db[0], DB_LEN, (char*)&seed_mask, OAEP_SEED_LEN);
+    
+    uint32_t seed = seed_mask ^ masked_seed;
+
+    char db_mask[DB_LEN] = {0};
+    oaep_mgf((const char*)&seed, OAEP_SEED_LEN, &db_mask[0], DB_LEN);
+
+    char db[DB_LEN] = {0};
+
+    for (size_t i = 0; i < DB_LEN; i++) {
+        db[i] = masked_db[i] ^ db_mask[i];
+    }
+
+    // verify that
+    // db = l_hash || 0* || 1 || msg
+    
+    if (strncmp(&db[0], (const char*)&l_hash, OAEP_SEED_LEN) != 0)
+        return MP_VAL;
+
+    size_t pos = OAEP_SEED_LEN;
+    while (pos < MSG_BUF_BYTES && db[pos] != 1) {
+        if (db[pos] != 0)
+            return MP_VAL;
+        pos += 1;
+    }
+    if (pos == MSG_BUF_BYTES)
+        return MP_VAL;
+
+    size_t msg_len = MSG_BUF_BYTES - pos - 1;
+    
+    msg->msg_len = msg_len;
+    memcpy(&msg->buf[0], &db[pos+1], msg_len);
+    msg->buf[msg_len] = 0;
+
     return MP_OKAY;
+}
+
+mp_err bytes_to_num(mp_int* n, const char* buf, size_t len) {
+    return mp_from_ubin(n, (const unsigned char*)buf, len);
+}
+
+mp_err num_to_bytes(const mp_int* n, char* buf, size_t max_len, size_t* actual_len) {
+    return mp_to_ubin(n, (unsigned char*)buf, max_len, actual_len);
 }
 
 // SHOW
@@ -471,7 +561,6 @@ mp_err show_pick_large_prime() {
     if ((err = mp_fwrite(&prime, 10, stdout)) != MP_OKAY)
         goto CLEANUP;
     putchar('\n');
-
 CLEANUP:
     mp_clear(&prime);
     return err;
@@ -483,6 +572,8 @@ mp_err show_rsa_demo() {
     if ((err = rsa_init(&state)) != MP_OKAY) 
         return err; 
     if ((err = rsa_pick_key(&state)) != MP_OKAY) 
+        goto LBL_ERR1;
+    if ((err = rsa_print_keys(&state)) != MP_OKAY) 
         goto LBL_ERR1;
     
     mp_int m, c;
@@ -529,14 +620,93 @@ LBL_ERR1:
     return err;
 }
 
+#define DEMO_MSG "A secret (padded) message."
+
 mp_err show_oaep_demo() {
     mp_err err;
 
-    MsgBuf buf;
-    msg_init(&buf, "a message");
-    printf("initial buf:\n");
-    msg_print_buf(&buf);
+    printf("padding `%s`\n", DEMO_MSG);
+    PaddedMessage padd_msg;
+    msg_oaep_encrypt(&padd_msg, DEMO_MSG);
+    printf("OAEP-padded: \n");
+    buf_display_print(&padd_msg.buf[0], MSG_BUF_BYTES);
+    UnPaddedMessage unpadd_msg;
+    if ((err = msg_oaep_decrypt(&padd_msg, &unpadd_msg)) != MP_OKAY)
+        goto CLEANUP;
+    printf("Dec = %s\n", unpadd_msg.buf);
 
+CLEANUP:
+    return err;
+}
+
+mp_err show_rsa_oaep_demo() {
+    mp_err err;
+
+    
+    RSAState state;
+    if ((err = rsa_init(&state)) != MP_OKAY) 
+        return err; 
+    if ((err = rsa_pick_key(&state)) != MP_OKAY) 
+        goto LBL_ERR1;
+    if ((err = rsa_print_keys(&state)) != MP_OKAY) 
+        goto LBL_ERR1;
+    
+    mp_int m, c;
+
+    if ((err = mp_init_multi(&m, &c, NULL)) != MP_OKAY) 
+        goto LBL_ERR1;
+    
+    printf("padding `%s`\n", DEMO_MSG);
+    PaddedMessage padd_msg;
+    msg_oaep_encrypt(&padd_msg, DEMO_MSG);
+    printf("OAEP-padded: \n");
+    buf_display_print(&padd_msg.buf[0], MSG_BUF_BYTES);
+    
+    if ((err = bytes_to_num(&m, &padd_msg.buf[0], MSG_BUF_BYTES)) != MP_OKAY)
+        goto CLEANUP;
+
+    printf("m = ");
+    if ((err = mp_fwrite(&m, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+
+    if ((err = rsa_encrypt(&state, &m, &c)) != MP_OKAY) 
+        goto CLEANUP;
+
+    printf("encrypt(m) = ");
+    if ((err = mp_fwrite(&c, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+
+    if ((err = rsa_decrypt(&state, &c, &m)) != MP_OKAY) 
+        goto CLEANUP;
+
+    printf("decrypt(c) = ");
+    if ((err = mp_fwrite(&m, 10, stdout)) != MP_OKAY)
+        goto CLEANUP;
+    putchar('\n');
+
+    size_t actual_len = 0;
+    if ((err = num_to_bytes(&m, &padd_msg.buf[0], MSG_BUF_BYTES, &actual_len)) != MP_OKAY)
+        goto CLEANUP;
+    // move to real position
+    if (actual_len != MSG_BUF_BYTES) {
+        memmove(&padd_msg.buf[MSG_BUF_BYTES - actual_len], &padd_msg.buf[0], actual_len);
+        memset(&padd_msg.buf[0], 0, MSG_BUF_BYTES - actual_len);
+    }
+
+    printf("OAEP-padded (dec): \n");
+    buf_display_print(&padd_msg.buf[0], MSG_BUF_BYTES);
+
+    UnPaddedMessage unpadd_msg;
+    if ((err = msg_oaep_decrypt(&padd_msg, &unpadd_msg)) != MP_OKAY)
+        goto CLEANUP;
+    printf("Dec = %s\n", unpadd_msg.buf);
+
+CLEANUP:
+    mp_clear_multi(&m, &c, NULL);
+LBL_ERR1:
+    rsa_clear(&state);
     return err;
 }
 
@@ -545,12 +715,15 @@ int main(void) {
     mp_err err;
     // if ((err = show_primes_up_to_1000()) != MP_OKAY) 
     //     goto PRINT_ERR;
-    // if ((err = show_pick_large_prime()) != MP_OKAY) 
-    //     goto PRINT_ERR;
-    // if ((err = show_rsa_demo()) != MP_OKAY)
-    //     goto PRINT_ERR;
-    if ((err = show_oaep_demo()) != MP_OKAY)
+    if ((err = show_pick_large_prime()) != MP_OKAY) 
         goto PRINT_ERR;
+    //if ((err = show_rsa_demo()) != MP_OKAY)
+    //     goto PRINT_ERR;
+    // if ((err = show_oaep_demo()) != MP_OKAY)
+    //     goto PRINT_ERR;
+    // return EXIT_SUCCESS;
+    // if ((err = show_rsa_oaep_demo()) != MP_OKAY)
+    //     goto PRINT_ERR;
     return EXIT_SUCCESS;
 PRINT_ERR:
     printf("ERR: %s\n", mp_error_to_string(err));
