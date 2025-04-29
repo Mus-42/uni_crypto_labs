@@ -1,9 +1,16 @@
+#include "lab3_sha256.h"
 #include <stdlib.h>
+#include <time.h>
+#include <assert.h>
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdbool.h>
-#include <labs_random.h>
+
 #include <tommath.h>
+
+#include <labs_random.h>
 
 #define MP_DIGITS_ROUND_UP(BITS) (BITS + MP_DIGIT_BIT - 1) / MP_DIGIT_BIT
 #define PRIME_BITS 512
@@ -12,6 +19,8 @@
 #define MODULUS_BITS 1024
 
 #define PRIMALITY_TEST_PRINT_INFO false 
+
+// MILLER RABIN
 
 // a - number
 // b - base
@@ -150,6 +159,85 @@ LBL_ERR1:
     mp_clear(&base);
     return err;
 }
+
+// message 
+
+#define MSG_BUF_BYTES (MODULUS_BITS / 8)
+// MSG & OEAP parts
+#define MSG_BUF_OAEP_BYTES 16
+#define MSG_BUF_MSG_BYTES (MSG_BUF_BYTES - MSG_BUF_OAEP_BYTES)
+
+typedef struct {
+    char buf[MSG_BUF_BYTES];
+} MsgBuf;
+
+
+// OAEP
+// (RFC 8017)
+
+mp_err msg_init(MsgBuf* msg_buf, const char* msg) {
+    size_t len = strlen(msg);
+    if (len > MSG_BUF_MSG_BYTES)
+        return MP_VAL;
+
+    memset(&msg_buf->buf[len], 0, MSG_BUF_BYTES-len);
+    memcpy(&msg_buf->buf[0], msg, len);
+
+    return MP_OKAY;
+}
+
+#define SPLIT_N (MSG_BUF_BYTES / 2)
+
+void msg_print_buf(const MsgBuf* msg_buf) {
+    for (size_t i = 0; i < MSG_BUF_BYTES; i++) {
+        printf("%02x", (unsigned char)msg_buf->buf[i]);
+
+        if (i % SPLIT_N == SPLIT_N - 1) {
+            putchar('\n');
+        }
+    }
+    for (size_t i = 0; i < MSG_BUF_BYTES; i++) {
+        if (isprint(msg_buf->buf[i])) {
+            printf(" %c", msg_buf->buf[i]);
+        } else {
+            printf(" .");
+        }
+
+        if (i % SPLIT_N == SPLIT_N - 1) {
+            putchar('\n');
+        }
+    }
+    putchar('\n');
+}
+
+uint32_t get_rng_seed() {
+    struct timespec t = {0};
+    int ret = clock_gettime(CLOCK_MONOTONIC, &t);
+    assert(ret == 0);
+    return (uint32_t)t.tv_nsec;
+}
+
+// #define OAEP_HASH_LEN (16 * 4) // in bytes
+#define OAEP_HASH_LEN 16  // in bytes
+
+// https://www.rfc-editor.org/rfc/rfc8017#appendix-B.2.1
+// mgf1
+void oaep_mgf(uint32_t seed, char* buf, size_t len) {
+    char seed_buf[8];
+    memcpy(&seed_buf[0], &seed, 4);
+    Sha256State sha256;
+    for (uint32_t i = 0; i < len; i += OAEP_HASH_LEN) {
+        memcpy(&seed_buf[4], &i, 4);
+        sha256_init(&sha256);
+        sha256_accumulate_hash(&sha256, sizeof(seed_buf), seed_buf);
+        Sha256Hash hash = sha256_finish(&sha256);
+        size_t n = len - i;
+        if (n > OAEP_HASH_LEN) 
+            n = OAEP_HASH_LEN;
+        memcpy(&buf[i], &hash, n);
+    }
+}
+
 
 mp_err pick_large_prime(int bits, int test_rounds, mp_int* prime) {
     mp_err err;
@@ -309,6 +397,45 @@ CLEANUP:
     return err;
 }
 
+// OAEP
+
+mp_err bignum_to_msg(MsgBuf* msg_buf, mp_int num) {
+    mp_err err;
+
+    return err;
+}
+
+#define DB_LEN (MSG_BUF_BYTES - OAEP_HASH_LEN - 1)
+
+mp_err msg_oaep_encrypt(const char* msg) {
+    size_t msg_len = strlen(msg);
+    // too long
+    if (msg_len + 2 * OAEP_HASH_LEN + 2 > MSG_BUF_BYTES)
+        return MP_VAL;
+
+    Sha256State sha256;
+    sha256_init(&sha256);
+    // hash of empty label
+    Sha256Hash l_hash = sha256_finish(&sha256);
+
+    uint32_t seed = get_rng_seed();
+
+    char db[DB_LEN] = {0};
+
+    // db = l_hash || 0* || 1 || msg
+    memcpy(&db[0], &l_hash, OAEP_HASH_LEN);
+    db[DB_LEN-msg_len-1] = 1;
+    memcpy(&db[DB_LEN-msg_len], msg, msg_len);
+
+    for (size_t i = 0; i < 0; i++) {
+        
+    }
+
+    return MP_OKAY;
+}
+
+// SHOW
+
 mp_err show_primes_up_to_1000() {
     mp_int a, b;
     mp_err err;
@@ -402,16 +529,31 @@ LBL_ERR1:
     return err;
 }
 
+mp_err show_oaep_demo() {
+    mp_err err;
+
+    MsgBuf buf;
+    msg_init(&buf, "a message");
+    printf("initial buf:\n");
+    msg_print_buf(&buf);
+
+    return err;
+}
+
+#ifndef LAB4_NOMAIN
 int main(void) {
     mp_err err;
     // if ((err = show_primes_up_to_1000()) != MP_OKAY) 
     //     goto PRINT_ERR;
     // if ((err = show_pick_large_prime()) != MP_OKAY) 
     //     goto PRINT_ERR;
-    if ((err = show_rsa_demo()) != MP_OKAY)
+    // if ((err = show_rsa_demo()) != MP_OKAY)
+    //     goto PRINT_ERR;
+    if ((err = show_oaep_demo()) != MP_OKAY)
         goto PRINT_ERR;
     return EXIT_SUCCESS;
 PRINT_ERR:
     printf("ERR: %s\n", mp_error_to_string(err));
     return EXIT_FAILURE;
 }
+#endif//LAB4_NOMAIN

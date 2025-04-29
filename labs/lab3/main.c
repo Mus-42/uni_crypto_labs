@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdalign.h>
 #include <labs_random.h>
+#include <lab3_sha256.h>
 
 static const uint32_t K[] = {
     0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5, 0x3956C25B, 0x59F111F1, 0x923F82A4, 0xAB1C5ED5,
@@ -31,21 +32,6 @@ static const uint8_t PADD_BUF[] = {
     0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0,
 };
-
-typedef struct {
-    uint32_t w[16];
-} Sha256Block;
-
-typedef struct {
-    uint32_t h[8];
-} Sha256Hash;
-
-typedef struct {
-    Sha256Hash hash;
-    Sha256Block current_block;
-    uint64_t length; // in _bytes_
-    uint32_t current_word;
-} Sha256State;
 
 void sha256_display_hash(const Sha256Hash* h) {
     for (size_t i = 0; i < 8; i++) {
@@ -167,7 +153,7 @@ static uint32_t u32_popcount_dumm(uint32_t w) {
 #define READ_BUF_SIZE (1<<12)
 #define TASK1_USAGE "usage: lab3 <filename>\n"
 
-void task1(const char* filename) {
+static void task1(const char* filename) {
     if (filename == NULL) {
         printf(TASK1_USAGE);
         return;
@@ -200,7 +186,7 @@ static const char* PANGRAMS[PANGRAMS_COUNT] = {
     "Glib jocks quiz nymph to vex dwarf",
 };
 
-void task2() {
+static void task2() {
     char buf[64];
     Sha256State state;
     for (size_t i = 0; i < PANGRAMS_COUNT; i++) {
@@ -255,7 +241,7 @@ static uint32_t u32_swap_bytes(uint32_t w) {
     return w >> 24 | (w >> 8 & 0xFF00) | (w << 8 & 0xFF0000) | (w << 24 & 0xFF000000);
 }
 
-void task3_1() {
+static void task3_1() {
     uint32_t buf[16];
     uint32_t rng_state = 42;
     Sha256State state;
@@ -289,7 +275,7 @@ void task3_1() {
     }
 }
 
-void task3_2() {
+static void task3_2() {
     uint32_t buf[16];
     uint32_t rng_state = 42;
     Sha256State state;
@@ -348,6 +334,7 @@ void task3_2() {
     sha256_display_hash(&hash_b);
 }
 
+#ifndef LAB3_NOMAIN
 int main(int argc, const char** argv) {
     //task1(argv[1]);
     //task2();
@@ -355,3 +342,4 @@ int main(int argc, const char** argv) {
     task3_1();
     //task3_2();
 }
+#endif//LAB3_NOMAIN

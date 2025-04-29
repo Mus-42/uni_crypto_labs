@@ -21,11 +21,11 @@ lab3: bin/lab3
 	./bin/lab3
 
 bin/lab3: labs/lab3/main.c labs/common/random.c
-	${CC} ${CC_FLAGS} labs/lab3/main.c labs/common/random.c -o bin/lab3
+	${CC} ${CC_FLAGS} -I labs/lab3 labs/lab3/main.c labs/common/random.c -o bin/lab3
 
 .PHONY: lab4
 lab4: bin/lab4
 	./bin/lab4
 
-bin/lab4: labs/lab4/main.c labs/common/random.c
-	${CC} ${CC_FLAGS} labs/lab4/main.c labs/common/random.c -ltommath -o bin/lab4
+bin/lab4: labs/lab4/main.c labs/common/random.c labs/lab3/main.c
+	${CC} ${CC_FLAGS} -I labs/lab3 -D LAB3_NOMAIN  labs/lab3/main.c labs/lab4/main.c labs/common/random.c -ltommath -o bin/lab4

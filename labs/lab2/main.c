@@ -437,9 +437,11 @@ void lab_task() {
     }
 }
 
+#ifndef LAB2_NOMAIN
 int main(int argc, const char** argv) {
     init_tables();
     //display_tables();
     //show_test_vectors();
     lab_task();
 }
+#endif//LAB2_NOMAIN
