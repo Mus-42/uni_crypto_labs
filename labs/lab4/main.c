@@ -1,4 +1,3 @@
-#include "lab3_sha256.h"
 #include <stdlib.h>
 #include <time.h>
 #include <assert.h>
@@ -10,6 +9,7 @@
 
 #include <tommath.h>
 
+#include <lab3_sha256.h>
 #include <labs_random.h>
 
 #define MP_DIGITS_ROUND_UP(BITS) (BITS + MP_DIGIT_BIT - 1) / MP_DIGIT_BIT
@@ -18,7 +18,7 @@
 #define MILLER_RABIN_ROUNDS 100
 #define MODULUS_BITS 1024
 
-#define PRIMALITY_TEST_PRINT_INFO false 
+#define PRIMALITY_TEST_PRINT_INFO false
 
 #define OAEP_LABEL "Cool label"
 
@@ -136,13 +136,14 @@ mp_err miller_rabin_test_rounds(const mp_int *a, int rounds, bool *result) {
         if ((err = mp_add_d(&base, 2, &base)) != MP_OKAY)
             goto CLEANUP;
 
+        // now base is random integer in range [2, a-1]
+
         if (PRIMALITY_TEST_PRINT_INFO) {
             printf("testing base: ");
             if ((err = mp_fwrite(&base, 10, stdout)) != MP_OKAY)
                 goto CLEANUP;
             putchar('\n');
         }
-        // now base is random integer in range [2, a-1]
     
         if ((err = miller_rabin_test(a, &base, &test_result)) != MP_OKAY)
             goto CLEANUP;
@@ -526,7 +527,7 @@ mp_err num_to_bytes(const mp_int* n, char* buf, size_t max_len, size_t* actual_l
 
 // SHOW
 
-mp_err show_primes_up_to_1000() {
+static mp_err show_primes_up_to_1000() {
     mp_int a, b;
     mp_err err;
     
@@ -551,7 +552,7 @@ CLEANUP:
     return err;
 }
 
-mp_err show_pick_large_prime() {
+static mp_err show_pick_large_prime() {
     mp_err err;
     mp_int prime;
 
@@ -566,7 +567,7 @@ CLEANUP:
     return err;
 }
 
-mp_err show_rsa_demo() {
+static mp_err show_rsa_demo() {
     mp_err err;
     RSAState state;
     if ((err = rsa_init(&state)) != MP_OKAY) 
@@ -620,9 +621,9 @@ LBL_ERR1:
     return err;
 }
 
-#define DEMO_MSG "A secret (padded) message."
+#define DEMO_MSG "A secret криптографія (padded) message."
 
-mp_err show_oaep_demo() {
+static mp_err show_oaep_demo() {
     mp_err err;
 
     printf("padding `%s`\n", DEMO_MSG);
@@ -639,7 +640,7 @@ CLEANUP:
     return err;
 }
 
-mp_err show_rsa_oaep_demo() {
+static mp_err show_rsa_oaep_demo() {
     mp_err err;
 
     
@@ -715,12 +716,12 @@ int main(void) {
     mp_err err;
     // if ((err = show_primes_up_to_1000()) != MP_OKAY) 
     //     goto PRINT_ERR;
-    if ((err = show_pick_large_prime()) != MP_OKAY) 
+    //if ((err = show_pick_large_prime()) != MP_OKAY) 
+    //    goto PRINT_ERR;
+    // if ((err = show_rsa_demo()) != MP_OKAY)
+    //      goto PRINT_ERR;
+    if ((err = show_oaep_demo()) != MP_OKAY)
         goto PRINT_ERR;
-    //if ((err = show_rsa_demo()) != MP_OKAY)
-    //     goto PRINT_ERR;
-    // if ((err = show_oaep_demo()) != MP_OKAY)
-    //     goto PRINT_ERR;
     // return EXIT_SUCCESS;
     // if ((err = show_rsa_oaep_demo()) != MP_OKAY)
     //     goto PRINT_ERR;
