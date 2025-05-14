@@ -29,3 +29,10 @@ lab4: bin/lab4
 
 bin/lab4: labs/lab4/main.c labs/common/random.c labs/lab3/main.c
 	${CC} ${CC_FLAGS} -I labs/lab3 -D LAB3_NOMAIN  labs/lab3/main.c labs/lab4/main.c labs/common/random.c -ltommath -o bin/lab4
+
+.PHONY: lab5
+lab5: bin/lab5
+	./bin/lab5
+
+bin/lab5: labs/lab5/main.c labs/common/random.c
+	${CC} ${CC_FLAGS} labs/lab5/main.c labs/common/random.c -o bin/lab5
